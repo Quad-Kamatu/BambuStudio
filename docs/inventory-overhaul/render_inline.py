@@ -33,8 +33,8 @@ main.wrap{padding:0;max-width:none}
 .plan-caption{color:var(--ink)}
 @media(min-width:640px){
  .slots{grid-template-columns:repeat(4,minmax(0,1fr))}
- .slot{grid-template-columns:1fr;text-align:left}
- .slot .spool{position:static;width:2.5rem;height:2.5rem}
+ .slot{text-align:left}
+ .slot .spool{position:static;width:clamp(3.5rem,9vw,4.5rem);height:clamp(3.5rem,9vw,4.5rem)}
  .slot-name{padding-right:0}
  .slot-meta{font-size:.875rem}
  .inventory-layout{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr)}
@@ -45,7 +45,7 @@ main.wrap{padding:0;max-width:none}
  .slot-mass{flex-wrap:wrap}
 }
 @media(min-width:1024px){
- .slots .slot{grid-template-columns:auto minmax(0,1fr)}
+ .slots .slot .spool{width:5rem;height:5rem}
  .location-column{display:table-cell}
  .roll-column{width:43%}.stock-column{width:34%}
  .row-name .spool{display:block}
