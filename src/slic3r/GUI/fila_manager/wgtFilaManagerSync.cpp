@@ -1,6 +1,8 @@
 #include "wgtFilaManagerSync.h"
 #include "wgtFilaManagerStore.h"
 #include "SharedInventoryBridge.hpp"
+#include "SharedAmsObservation.hpp"
+#include <chrono>
 #include "wgtFilaManagerCloudSync.h"
 #include "wgtFilaManagerCloudClient.h"
 #include "wgtFilaManagerCloudDispatcher.h"
@@ -43,9 +45,43 @@ wgtFilaManagerSync::wgtFilaManagerSync(wgtFilaManagerStore* store)
     : m_store(store)
 {}
 
-bool wgtFilaManagerSync::on_device_update(MachineObject* obj)
+bool wgtFilaManagerSync::on_device_update(MachineObject* obj, const std::string& message)
 {
-    if (SharedInventoryBridge::enabled()) return false;
+    if (SharedInventoryBridge::enabled()) {
+        if (!obj || !m_store || !obj->is_online()) return false;
+        const auto system = obj->GetFilaSystem();
+        if (!system) return false;
+        const auto& units = system->GetAmsList();
+        const auto unit = units.find("0");
+        if (unit == units.end() || !unit->second || !unit->second->IsExist()) return false;
+        const auto observation = SharedAmsObservation::from_packet(message, obj->get_dev_id());
+        if (!observation) return false;
+        static std::map<std::string, nlohmann::json> acknowledged;
+        static std::map<std::string, std::chrono::steady_clock::time_point> attempts;
+        const auto device = obj->get_dev_id();
+        if (acknowledged[device] == *observation) return false;
+        const auto now = std::chrono::steady_clock::now();
+        if (now - attempts[device] < std::chrono::seconds(2)) return false;
+        try {
+            m_store->save();
+            const auto stamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+            const auto result = SharedInventoryBridge::request({{"version", 1}, {"request_id", "ams-observation-" + std::to_string(stamp)}, {"command", *observation}});
+            if (!result.value("ok", false)) {
+                attempts[device] = now;
+                BOOST_LOG_TRIVIAL(warning) << "Shared AMS observation was not acknowledged";
+                return false;
+            }
+            attempts.erase(device);
+            acknowledged[device] = *observation;
+            const bool changed = result.contains("event_id");
+            if (changed) m_store->load();
+            return changed;
+        } catch (const std::exception& e) {
+            attempts[device] = now;
+            BOOST_LOG_TRIVIAL(warning) << "Shared AMS reconciliation unavailable: " << e.what();
+            return false;
+        }
+    }
     if (!obj || !m_store) return false;
     if (!obj->is_online()) return false;
     calibrate_pending_badges(obj);
@@ -190,6 +226,7 @@ void wgtFilaManagerSync::dismiss_pending_badge(const std::string& dev_id,
 bool wgtFilaManagerSync::on_device_disconnect(const std::string& dev_id,
                                               const std::string& dev_name)
 {
+    if (SharedInventoryBridge::enabled()) return false; // Offline is not evidence of removal.
     if (!m_store) return false;
     const std::string prefix = dev_id + ":";
     for (auto it = m_prev_tray_exists.begin(); it != m_prev_tray_exists.end(); ) {

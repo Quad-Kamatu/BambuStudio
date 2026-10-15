@@ -37,7 +37,7 @@ docker run --rm --name joseph-bambu-fork-builder \
         -DSLIC3R_BUILD_TESTS=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     fi
     cmake --build /build/app --parallel 12 \
-      --target BambuStudio filament_spool_resolution_tests filament_inventory_cache_tests
+      --target BambuStudio filament_spool_resolution_tests filament_inventory_cache_tests filament_shared_ams_tests
     ctest --test-dir /build/app --output-on-failure --no-tests=error \
-      -R "^filament_(spool_resolution|inventory_cache)_tests$"
+      -R "^filament_(spool_resolution|inventory_cache|shared_ams)_tests$"
   '

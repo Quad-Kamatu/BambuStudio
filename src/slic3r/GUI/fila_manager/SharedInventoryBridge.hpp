@@ -14,6 +14,23 @@ inline bool enabled()
     return helper && *helper;
 }
 
+// Scope passive telemetry even when the inventory tab is open without Device selected.
+inline bool device_matches(const std::string& device)
+{
+    if (!enabled()) return false;
+    static const std::string configured = []() -> std::string {
+        const char* path = std::getenv("FILAMENT_SHARED_CONFIG");
+        if (!path) return {};
+        try {
+            if (boost::filesystem::file_size(path) > 2000000) return {};
+            std::ifstream file(path);
+            nlohmann::json config; file >> config;
+            return config.at("device").at("dev_id").get<std::string>();
+        } catch (...) { return {}; }
+    }();
+    return !configured.empty() && configured == device;
+}
+
 // A local trusted executable, invoked as argv (never through a shell). All
 // request/response files live in a private temporary directory and are removed.
 inline nlohmann::json request(const nlohmann::json& payload)

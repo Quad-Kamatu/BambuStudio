@@ -2,6 +2,7 @@
 #define slic3r_wgtFilaManagerSync_h_
 
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -21,7 +22,7 @@ public:
     explicit wgtFilaManagerSync(wgtFilaManagerStore* store);
     ~wgtFilaManagerSync() = default;
 
-    bool on_device_update(MachineObject* obj);
+    bool on_device_update(MachineObject* obj, const std::string& message = {});
     bool sync_all_trays(MachineObject* obj);
     bool on_device_disconnect(const std::string& dev_id, const std::string& dev_name);
     void drain_filament_hints(const std::string& dev_id);

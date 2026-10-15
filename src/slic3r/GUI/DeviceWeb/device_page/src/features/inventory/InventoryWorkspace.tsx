@@ -3,9 +3,11 @@ import * as Dialog from '@radix-ui/react-dialog';
 import type { CSSProperties, FormEvent } from 'react';
 import { Spool } from './Spool';
 import { isLow, mass, percent, sourceLabel } from './types';
-import type { Command, Details, Inventory, Roll, Stock } from './types';
+import type { AmsObservation, Command, Details, Inventory, Roll, Stock } from './types';
 import { useInventory } from './useInventory';
 import type { SaveState } from './useInventory';
+import { dropCommand, isRollDrag, rollDragType } from './drag';
+import type { DragControls, RollDrag } from './drag';
 import './inventory.css';
 
 type Client = ReturnType<typeof useInventory>;
@@ -22,15 +24,24 @@ function material(roll: Roll) { return [roll.material, roll.finish].filter(Boole
 function Bar({roll}: {roll: Roll}) {
   return <div className={`inventory-bar ${roll.remaining === null ? 'unknown' : ''}`} aria-hidden="true" style={{'--roll-color': roll.color, '--fill': `${Math.min(100, Math.max(0, Number(roll.percent ?? 0)))}%`} as CSSProperties}><span/></div>;
 }
-function SlotRack({inventory, selected, select}: {inventory: Inventory; selected: string; select: (id: string) => void}) {
+function SlotRack({inventory, selected, select, drag}: {inventory: Inventory; selected: string; select: (id: string) => void; drag: DragControls}) {
   return <section aria-labelledby="slots-heading"><div className="inventory-section-heading"><h2 id="slots-heading">AMS 1</h2><span>Inventory assignments</span></div>
     <div className="inventory-slots">{[1,2,3,4].map(slot => {
       const roll = inventory.rolls.find(r => r.slot === slot && !r.archived);
-      return roll ? <button key={slot} className={`inventory-slot ${selected === roll.id ? 'selected' : ''}`} onClick={() => select(roll.id)} aria-pressed={selected === roll.id}>
+      return roll ? <button {...drag.source(roll)} {...drag.target(slot)} key={slot} className={`inventory-slot ${selected === roll.id ? 'selected' : ''}`} onClick={() => select(roll.id)} aria-pressed={selected === roll.id}>
         <div className="inventory-slot-info"><span className="inventory-muted">Slot {slot}</span><strong>{roll.name}</strong><span className="inventory-muted">{material(roll)}</span></div>
         <Spool color={roll.color} empty={roll.remaining !== null && Number(roll.remaining) === 0}/><div className="inventory-slot-balance"><Bar roll={roll}/><div><span>{mass(roll.remaining)}</span><span>{percent(roll)}</span></div></div>
-      </button> : <div className="inventory-slot unassigned" key={slot}><div><span className="inventory-muted">Slot {slot}</span><strong>Unassigned</strong><span className="inventory-muted">Choose a roll below to assign</span></div></div>;
+      </button> : <div {...drag.target(slot)} className="inventory-slot unassigned" key={slot}><div><span className="inventory-muted">Slot {slot}</span><strong>Unassigned</strong><span className="inventory-muted">Choose a roll below to assign</span></div></div>;
     })}</div></section>;
+}
+function AmsRead({observation, client}: {observation: AmsObservation; client: Client}) {
+  const [rollId, setRollId] = useState('new');
+  const roll = client.inventory?.rolls.find(r => r.id === rollId);
+  const pending = client.status.kind === 'pending';
+  return <section className="inventory-ams-read"><Spool color={observation.color}/><div><h3>Bambu spool detected in slot {observation.slot}</h3><p className="inventory-help">{observation.name} · {observation.material || 'Material not reported'} · Tag …{observation.uuid.slice(-8)}</p><p className="inventory-help">Link its physical identity once. Future RFID reads move this roll automatically and keep its recorded amount.</p>
+    <label>Track this spool as<select value={rollId} disabled={pending} onChange={e => setRollId(e.target.value)}><option value="new">A separate new inventory record</option>{client.inventory?.rolls.filter(r => !r.archived).map(r => <option key={r.id} value={r.id}>{r.name} · {r.id} · {r.location}</option>)}</select></label>
+    <button disabled={pending || (rollId !== 'new' && !roll)} onClick={() => { void client.commit({op: 'ams_link', uuid: observation.uuid, observation_revision: observation.revision, id: roll?.id ?? null, expected: roll ?? null}); }}>{roll ? 'Link existing roll' : 'Track as new roll'}</button>
+  </div></section>;
 }
 function ActivityTimeline({roll, client}: {roll: Roll; client: Client}) {
   return <section className="inventory-detail-section"><h3>Recent activity</h3>{roll.history.length ? <ol className="inventory-timeline">{roll.history.map(event => <li key={event.id}><strong>{event.summary}</strong><time dateTime={event.at}>{new Date(event.at).toLocaleString()}</time>{(event.before || event.after) && <details><summary>Before and after</summary><p>{event.before || 'Not recorded'}</p><p>→ {event.after || 'Not recorded'}</p></details>}{event.undoable && <button disabled={client.status.kind === 'pending'} onClick={() => { void client.commit({op: 'undo', event_id: event.id}); }}>Undo this change</button>}</li>)}</ol> : <p className="inventory-help">Earlier balance evidence is retained below. New changes appear here.</p>}
@@ -117,6 +128,34 @@ export function InventoryWorkspace({client}: {client: Client}) {
   const [page, setPage] = useState(0);
   const [draft, setDraft] = useState<Draft | null>(null);
   const inventory = client.inventory;
+  const dragging = useRef<RollDrag | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [dropMessage, setDropMessage] = useState('');
+  const drag: DragControls = {
+    active: dragActive,
+    source: roll => ({
+      draggable: !roll.archived && client.status.kind !== 'pending',
+      onDragStart: event => {
+        if (!inventory || roll.archived || client.status.kind === 'pending') { event.preventDefault(); return; }
+        dragging.current = {roll, inventory}; setDragActive(true); setDropMessage('');
+        event.dataTransfer.setData(rollDragType, roll.id); event.dataTransfer.effectAllowed = 'move';
+      },
+      onDragEnd: () => { dragging.current = null; setDragActive(false); document.querySelectorAll('[data-drop-over]').forEach(e => e.removeAttribute('data-drop-over')); },
+    }),
+    target: slot => ({
+      onDragOver: event => { if (dragging.current && isRollDrag(event) && client.status.kind !== 'pending') {event.preventDefault(); event.dataTransfer.dropEffect = 'move'; event.currentTarget.setAttribute('data-drop-over', 'true');} },
+      onDragLeave: event => { if (!event.currentTarget.contains(event.relatedTarget instanceof Node ? event.relatedTarget : null)) event.currentTarget.removeAttribute('data-drop-over'); },
+      onDrop: event => {
+        event.currentTarget.removeAttribute('data-drop-over');
+        const snapshot = dragging.current;
+        dragging.current = null; setDragActive(false);
+        if (!snapshot || !isRollDrag(event) || event.dataTransfer.getData(rollDragType) !== snapshot.roll.id || client.status.kind === 'pending') return;
+        event.preventDefault(); event.stopPropagation();
+        const command = dropCommand(snapshot, slot);
+        if (command) void client.commit(command).then(reply => { if (reply) { setSelected(snapshot.roll.id); setDropMessage(slot ? `Assigned ${snapshot.roll.name} to slot ${slot}.` : `Moved ${snapshot.roll.name} to Storage.`); } });
+      },
+    }),
+  };
   const chosen = inventory?.rolls.find(r => r.id === selected) ?? inventory?.rolls.find(r => !r.archived);
   useEffect(() => { remember('selected', selected); }, [selected]);
   useEffect(() => { remember('filter', filter); setPage(0); }, [filter]);
@@ -136,15 +175,15 @@ export function InventoryWorkspace({client}: {client: Client}) {
   return <main className={`inventory-workspace ${density}`} data-theme={client.theme}>
     <header className="inventory-header"><div><h1>Filament inventory</h1><p className="inventory-muted">Your rolls, shared with the desktop widget.</p></div><div className="inventory-header-actions"><span role="status" className={`inventory-status ${client.status.kind === 'failed' ? 'failed' : ''}`}><i/>{client.status.kind === 'failed' ? client.status.operation === 'save' ? 'Could not save' : 'Could not refresh' : statusText[client.status.kind]}</span><button className="primary" disabled={!inventory || client.status.kind === 'pending'} onClick={() => setDraft({kind: 'add'})}>+ Add roll</button></div></header>
     {client.status.kind === 'failed' && <div className="inventory-alert" role="alert"><span>{client.status.error}</span><button onClick={() => { void client.refresh(); }}>Retry refresh</button></div>}
-    {inventory ? <><SlotRack inventory={inventory} selected={chosen?.id ?? ''} select={select}/><div className="inventory-workspace-grid"><section className="inventory-list" aria-labelledby="inventory-list-heading"><div className="inventory-section-heading"><h2 id="inventory-list-heading">{filter === 'storage' ? 'Stored rolls' : filters.find(f => f.id === filter)?.label}</h2><label className="inventory-density"><span className="inventory-sr-only">Row density</span><select value={density} onChange={e => setDensity(e.target.value)}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label></div>
+    {inventory ? <>{inventory.ams.pending.map(o => <AmsRead key={o.uuid + o.slot} observation={o} client={client}/>)}<SlotRack inventory={inventory} selected={chosen?.id ?? ''} select={select} drag={drag}/><div className={`inventory-storage-drop ${drag.active ? 'drag-active' : ''}`} {...drag.target(0)}><span>Drag rolls onto AMS slots to assign or swap. Drop here to move to Storage.</span><span className="inventory-muted">Assign controls also work with keyboard and touch.</span></div><p className="inventory-sr-only" role="status">{dropMessage}</p><div className="inventory-workspace-grid"><section className="inventory-list" aria-labelledby="inventory-list-heading"><div className="inventory-section-heading"><h2 id="inventory-list-heading">{filter === 'storage' ? 'Stored rolls' : filters.find(f => f.id === filter)?.label}</h2><label className="inventory-density"><span className="inventory-sr-only">Row density</span><select value={density} onChange={e => setDensity(e.target.value)}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label></div>
       <div className="inventory-filters" aria-label="Inventory filter">{filters.map(f => <button key={f.id} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>{f.label}</button>)}</div>
       <div className="inventory-list-tools"><input type="search" aria-label="Search rolls" placeholder="Search name, material, brand or ID" value={query} onChange={e => setQuery(e.target.value)}/><select aria-label="Sort rolls" value={sort} onChange={e => setSort(e.target.value)}><option value="name">Name</option><option value="remaining">Remaining amount</option><option value="material">Material</option></select></div>
-      <div className="inventory-table-shell"><table><thead><tr><th scope="col">Physical roll</th><th scope="col">Remaining</th><th scope="col" className="inventory-location-col">Location</th></tr></thead><tbody>{rolls.slice(actualPage*50, actualPage*50+50).map(roll => <tr key={roll.id} className={chosen?.id === roll.id ? 'selected' : ''}><td><div className="inventory-row-name"><Spool color={roll.color} empty={roll.remaining !== null && Number(roll.remaining) === 0}/><button className="inventory-roll-button" onClick={() => select(roll.id)} aria-pressed={chosen?.id === roll.id}>{roll.name}<span>{material(roll)}</span><span className="inventory-id">{roll.id}</span></button></div></td><td><strong title={roll.remaining ?? 'Unknown'}>{mass(roll.remaining)}</strong><span className="inventory-row-source">{sourceLabel[roll.source]}{roll.percent !== null ? ` · ${percent(roll)}` : ''}</span><Bar roll={roll}/></td><td className="inventory-location-col"><span className={`inventory-badge ${isLow(roll) ? 'low' : ''}`}>{roll.archived ? 'Archived' : roll.slot ? `AMS 1 · Slot ${roll.slot}` : isLow(roll) ? 'Storage · Low' : 'Storage'}</span></td></tr>)}</tbody></table>
+      <div className="inventory-table-shell"><table><thead><tr><th scope="col">Physical roll</th><th scope="col">Remaining</th><th scope="col" className="inventory-location-col">Location</th></tr></thead><tbody>{rolls.slice(actualPage*50, actualPage*50+50).map(roll => <tr key={roll.id} className={chosen?.id === roll.id ? 'selected' : ''}><td><div {...drag.source(roll)} {...(roll.slot ? drag.target(roll.slot) : {})} className="inventory-row-name"><Spool color={roll.color} empty={roll.remaining !== null && Number(roll.remaining) === 0}/><button className="inventory-roll-button" onClick={() => select(roll.id)} aria-pressed={chosen?.id === roll.id}>{roll.name}<span>{material(roll)}</span><span className="inventory-id">{roll.id}</span></button></div></td><td><strong title={roll.remaining ?? 'Unknown'}>{mass(roll.remaining)}</strong><span className="inventory-row-source">{sourceLabel[roll.source]}{roll.percent !== null ? ` · ${percent(roll)}` : ''}</span><Bar roll={roll}/></td><td className="inventory-location-col"><span className={`inventory-badge ${isLow(roll) ? 'low' : ''}`}>{roll.archived ? 'Archived' : roll.slot ? `AMS 1 · Slot ${roll.slot}` : isLow(roll) ? 'Storage · Low' : 'Storage'}</span></td></tr>)}</tbody></table>
       {!rolls.length && <div className="inventory-empty"><p>No matching rolls.</p><button onClick={() => { setQuery(''); setFilter('all'); }}>Show all active rolls</button></div>}
       <div className="inventory-table-foot"><span>{rolls.length} {rolls.length === 1 ? 'roll' : 'rolls'}{rolls.length > 50 ? ` · ${actualPage*50+1}–${Math.min(rolls.length, actualPage*50+50)} shown` : ''}</span>{rolls.length > 50 && <div><button disabled={actualPage === 0} onClick={() => setPage(actualPage-1)}>Previous</button><button disabled={(actualPage+1)*50 >= rolls.length} onClick={() => setPage(actualPage+1)}>Next</button></div>}</div></div>
       <p className="inventory-help">One row per physical roll. Amounts retain their recorded source and precision.</p></section>
       {chosen && <RollDetails roll={chosen} edit={setDraft} client={client}/>}</div>
-      <details className="inventory-connection"><summary>Connections and inventory source</summary><p>Studio and the desktop widget read the same local register. Bambu cloud login is optional for inventory editing. A separate read-only stock reader may report estimates; no cloud write or printer Load is performed here.</p><p>Last read: {new Date(inventory.read_at).toLocaleTimeString()}</p></details></> : <p className="inventory-empty">{client.status.kind === 'failed' ? 'Your saved inventory is retained. Retry when the local backend is available.' : 'Opening inventory…'}</p>}
+      <details className="inventory-connection"><summary>Connections and inventory source</summary><p>Studio and the desktop widget read the same local register. Bambu cloud login is optional for inventory editing. Known Bambu spool UUIDs update inventory locations after completed AMS reads. First scans can be linked above. Third-party rolls use manual assignment. The separate stock reader may report estimates; no cloud write or printer Load is performed here.</p><p>Last read: {new Date(inventory.read_at).toLocaleTimeString()}</p></details></> : <p className="inventory-empty">{client.status.kind === 'failed' ? 'Your saved inventory is retained. Retry when the local backend is available.' : 'Opening inventory…'}</p>}
     {client.undo && <div className="inventory-toast" role="status"><span>Change saved locally.</span><button disabled={client.status.kind === 'pending'} onClick={() => { if (client.undo) void client.commit({op: 'undo', event_id: client.undo}); }}>Undo</button></div>}
     {draft && <Editor draft={draft} close={() => setDraft(null)} client={client} select={select}/>}</main>;
 }

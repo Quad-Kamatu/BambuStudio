@@ -1,5 +1,6 @@
 #include "libslic3r/Technologies.hpp"
 #include "GUI_App.hpp"
+#include "fila_manager/SharedInventoryBridge.hpp"
 #include "BindDialog.hpp"
 #include "GUI_Init.hpp"
 #include "GUI_ObjectList.hpp"
@@ -2349,11 +2350,15 @@ void GUI_App::init_networking_callbacks()
                         // 仅在在位字段实际变化时才推 spool list，避免每条 MQTT 都整体重渲。
                         bool fila_mount_changed = false;
                         if (auto* sync = wxGetApp().fila_manager_sync())
-                            fila_mount_changed = sync->on_device_update(obj);
+                            fila_mount_changed = sync->on_device_update(obj, msg);
                         if (!m_disable_fila_manager && mainframe && mainframe->web_device()) {
                             if (fila_mount_changed)
                                 mainframe->web_device()->NotifyFilamentSessionState();
                         }
+                    } else if (SharedInventoryBridge::device_matches(dev_id)) {
+                        obj->parse_json("cloud", msg);
+                        if (auto* sync = wxGetApp().fila_manager_sync())
+                            sync->on_device_update(obj, msg);
                     } else {
                         obj->parse_json("cloud", msg, true);
                     }
@@ -2408,11 +2413,14 @@ void GUI_App::init_networking_callbacks()
                         // 仅在在位字段实际变化时才推 spool list，避免每条 MQTT 都整体重渲。
                         bool fila_mount_changed = false;
                         if (auto* sync = wxGetApp().fila_manager_sync())
-                            fila_mount_changed = sync->on_device_update(obj);
+                            fila_mount_changed = sync->on_device_update(obj, msg);
                         if (!m_disable_fila_manager && mainframe && mainframe->web_device()) {
                             if (fila_mount_changed)
                                 mainframe->web_device()->NotifyFilamentSessionState();
                         }
+                    } else if (SharedInventoryBridge::device_matches(dev_id)) {
+                        if (auto* sync = wxGetApp().fila_manager_sync())
+                            sync->on_device_update(obj, msg);
                     }
                 }
 

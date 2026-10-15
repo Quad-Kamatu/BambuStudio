@@ -43,3 +43,8 @@ add_executable(filament_inventory_cache_tests test_inventory_cache.cpp)
 target_include_directories(filament_inventory_cache_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(filament_inventory_cache_tests test_common)
 add_test(NAME filament_inventory_cache_tests COMMAND filament_inventory_cache_tests)
+
+add_executable(filament_shared_ams_tests test_shared_ams_observation.cpp)
+target_include_directories(filament_shared_ams_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(filament_shared_ams_tests test_common)
+add_test(NAME filament_shared_ams_tests COMMAND filament_shared_ams_tests)

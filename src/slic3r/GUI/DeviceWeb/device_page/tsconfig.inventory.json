@@ -5,5 +5,5 @@
     "exactOptionalPropertyTypes": true,
     "noImplicitOverride": true
   },
-  "include": ["src/features/inventory/types.ts", "src/features/inventory/Spool.tsx", "src/features/inventory/useInventory.ts", "src/features/inventory/InventoryWorkspace.tsx", "src/vite-env.d.ts"]
+  "include": ["src/features/inventory/types.ts", "src/features/inventory/drag.ts", "src/features/inventory/Spool.tsx", "src/features/inventory/useInventory.ts", "src/features/inventory/InventoryWorkspace.tsx", "src/vite-env.d.ts"]
 }

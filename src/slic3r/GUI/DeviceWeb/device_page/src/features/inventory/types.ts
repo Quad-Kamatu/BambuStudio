@@ -6,7 +6,9 @@ export type Roll = {
   source: Source; balance_date: string | null; evidence: string; location: string; slot: number;
   archived: boolean; purchase_url: string; revision: string; history: Activity[];
 };
+export type AmsObservation = {uuid: string; slot: number; name: string; material: string; color: string; revision: string};
 export type Inventory = { version: 1; revision: string; rolls: Roll[]; read_at: string;
+  ams: {pending: AmsObservation[]};
   capabilities: { local_edit: boolean; undo: boolean; physical_load: boolean } };
 export type Details = Pick<Roll, 'name' | 'material' | 'brand' | 'finish' | 'profile' | 'color' | 'purchase_url'>;
 export type Stock = { source: Source | 'gross' | 'percent'; remaining: string | null; tare?: string | null };
@@ -16,7 +18,8 @@ export type Command =
   | { op: 'stock'; id: string; expected: Roll; stock: Stock }
   | { op: 'move'; id: string; expected: Roll; location: string; occupant: string | null; swap: boolean }
   | { op: 'archive' | 'restore'; id: string; expected: Roll }
-  | { op: 'undo'; event_id: string };
+  | { op: 'undo'; event_id: string }
+  | { op: 'ams_link'; uuid: string; observation_revision: string; id: string | null; expected: Roll | null };
 export type Reply = { ok: boolean; enabled?: boolean; theme?: string; error?: string; inventory?: Inventory;
   event_id?: string; created_id?: string | null };
 export const sourceLabel: Record<Source, string> = {
@@ -56,6 +59,7 @@ export function parseReply(value: unknown): Reply {
   const inventory = payload.inventory;
   if (!object(inventory) || inventory.version !== 1 || typeof inventory.revision !== 'string'
       || typeof inventory.read_at !== 'string' || !Array.isArray(inventory.rolls) || !inventory.rolls.every(isRoll)
+      || !object(inventory.ams) || !Array.isArray(inventory.ams.pending) || !inventory.ams.pending.every((o: unknown) => object(o) && typeof o.slot === 'number' && ['uuid','name','material','color','revision'].every(k => typeof o[k] === 'string'))
       || !object(inventory.capabilities) || typeof inventory.capabilities.local_edit !== 'boolean'
       || typeof inventory.capabilities.undo !== 'boolean' || typeof inventory.capabilities.physical_load !== 'boolean') {
     throw new Error('Inventory data is incompatible; your stock was retained');
