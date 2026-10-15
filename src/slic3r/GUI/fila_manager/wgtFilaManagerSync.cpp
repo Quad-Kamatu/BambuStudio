@@ -2,6 +2,7 @@
 #include "wgtFilaManagerStore.h"
 #include "SharedInventoryBridge.hpp"
 #include "SharedAmsObservation.hpp"
+#include "SharedPrintObservation.hpp"
 #include <chrono>
 #include "wgtFilaManagerCloudSync.h"
 #include "wgtFilaManagerCloudClient.h"
@@ -48,39 +49,45 @@ wgtFilaManagerSync::wgtFilaManagerSync(wgtFilaManagerStore* store)
 bool wgtFilaManagerSync::on_device_update(MachineObject* obj, const std::string& message)
 {
     if (SharedInventoryBridge::enabled()) {
-        if (!obj || !m_store || !obj->is_online()) return false;
+        if (!obj || !m_store || !obj->is_online() || !SharedInventoryBridge::device_matches(obj->get_dev_id())) return false;
+        std::vector<nlohmann::json> observations;
+        if (auto value = SharedPrintObservation::from_packet(message, obj->get_dev_id(), obj->job_id_, obj->print_status,
+                                                             obj->subtask_name, obj->print_job_filament_mapping))
+            observations.push_back(*value);
         const auto system = obj->GetFilaSystem();
-        if (!system) return false;
-        const auto& units = system->GetAmsList();
-        const auto unit = units.find("0");
-        if (unit == units.end() || !unit->second || !unit->second->IsExist()) return false;
-        const auto observation = SharedAmsObservation::from_packet(message, obj->get_dev_id());
-        if (!observation) return false;
+        if (system) {
+            const auto& units = system->GetAmsList();
+            const auto unit = units.find("0");
+            if (unit != units.end() && unit->second && unit->second->IsExist())
+                if (auto value = SharedAmsObservation::from_packet(message, obj->get_dev_id())) observations.push_back(*value);
+        }
         static std::map<std::string, nlohmann::json> acknowledged;
         static std::map<std::string, std::chrono::steady_clock::time_point> attempts;
-        const auto device = obj->get_dev_id();
-        if (acknowledged[device] == *observation) return false;
-        const auto now = std::chrono::steady_clock::now();
-        if (now - attempts[device] < std::chrono::seconds(2)) return false;
-        try {
-            m_store->save();
-            const auto stamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
-            const auto result = SharedInventoryBridge::request({{"version", 1}, {"request_id", "ams-observation-" + std::to_string(stamp)}, {"command", *observation}});
-            if (!result.value("ok", false)) {
-                attempts[device] = now;
-                BOOST_LOG_TRIVIAL(warning) << "Shared AMS observation was not acknowledged";
-                return false;
+        bool changed = false;
+        for (const auto& observation : observations) {
+            const auto key = obj->get_dev_id() + observation.at("op").get<std::string>();
+            if (acknowledged[key] == observation) continue;
+            const auto now = std::chrono::steady_clock::now();
+            if (now - attempts[key] < std::chrono::seconds(2)) continue;
+            try {
+                m_store->save();
+                const auto stamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+                const auto result = SharedInventoryBridge::request({{"version", 1}, {"request_id", "device-observation-" + std::to_string(stamp)}, {"command", observation}});
+                if (!result.value("ok", false)) {
+                    attempts[key] = now;
+                    BOOST_LOG_TRIVIAL(warning) << "Shared device observation was not acknowledged";
+                    continue;
+                }
+                attempts.erase(key);
+                acknowledged[key] = observation;
+                changed = changed || result.contains("event_id");
+            } catch (const std::exception& e) {
+                attempts[key] = now;
+                BOOST_LOG_TRIVIAL(warning) << "Shared device reconciliation unavailable: " << e.what();
             }
-            attempts.erase(device);
-            acknowledged[device] = *observation;
-            const bool changed = result.contains("event_id");
-            if (changed) m_store->load();
-            return changed;
-        } catch (const std::exception& e) {
-            attempts[device] = now;
-            BOOST_LOG_TRIVIAL(warning) << "Shared AMS reconciliation unavailable: " << e.what();
-            return false;
         }
+        if (changed) m_store->load();
+        return changed;
     }
     if (!obj || !m_store) return false;
     if (!obj->is_online()) return false;

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import zipfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--helper-dir', type=Path, required=True)
@@ -31,6 +32,21 @@ def seed(count=11):
         path.unlink(missing_ok=True)
 seed()
 
+def print_scenario(state):
+    seed()
+    archive = Path(root.name) / 'fixture.3mf'
+    with zipfile.ZipFile(archive, 'w') as z:
+        z.writestr('Metadata/plate_1.gcode', '; fixture sliced file\nG1 E1\n')
+        z.writestr('Metadata/slice_info.config', '<config><plate><metadata key="index" value="1"/><filament id="1" used_g="12.5"/></plate></config>')
+    attempt = 'b' * 32
+    commands = [dict(op='print_prepare', attempt=attempt, title='Fixture print_u'+attempt[:12], path=str(archive), plate=1, mapping=[0]),
+                dict(op='print_bind', attempt=attempt, job_id='45678'),
+                dict(op='print_observe', job_id='45678', state='RUNNING', mapping=[0])]
+    if state == 'refill': commands.append(dict(op='print_observe', job_id='45678', state='RUNNING', mapping=[3], active_slot=3))
+    if state != 'running': commands.append(dict(op='print_observe', job_id='45678', state='FAILED' if state == 'failed' else 'FINISH', mapping=[3] if state == 'refill' else [0]))
+    for n, command in enumerate(commands):
+        inventory_workspace.execute(log, meta, config, {'request_id': f'fixture-print-command-{n:04d}', 'command': {**command, 'device_id': 'fixture'}})
+
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         global theme, fail
@@ -41,6 +57,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == '/fixture':
             if 'count' in body: seed(min(1000, max(3, int(body['count']))))
             theme = body.get('theme', theme); fail = body.get('fail', fail)
+            if body.get('print') in ('running', 'complete', 'failed', 'refill'): print_scenario(body['print'])
             response = {'ok': True}
         else:
             try:

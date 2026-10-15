@@ -60,3 +60,28 @@ TEST_CASE("Only fresh AMS frames become RFID observations", "[shared-ams]")
     }
 
 }
+
+#include "slic3r/GUI/fila_manager/SharedPrintObservation.hpp"
+TEST_CASE("Print usage observations require fresh relevant telemetry", "[shared-print]")
+{
+    auto observe = [](const std::string& packet, const std::string& job = "1234", const std::string& state = "RUNNING") {
+        return SharedPrintObservation::from_packet(packet, "fixture", job, state, "part_u123456789abc", {0, 2});
+    };
+    REQUIRE_FALSE(observe("not json"));
+    REQUIRE_FALSE(observe(R"({"print":{"nozzle_temper":220}})"));
+    REQUIRE_FALSE(observe(R"({"print":{"gcode_state":"FINISH"}})", "0", "FINISH"));
+    REQUIRE_FALSE(observe(R"({"print":{"gcode_state":"FINISH"}})", "1234", "UNKNOWN"));
+    REQUIRE_FALSE(observe(R"({"print":{"gcode_state":"FINISH"}})", "1234", "FINISH"));
+    auto done = observe(R"({"print":{"gcode_state":"FINISH","job_id":"1234"}})", "1234", "FINISH");
+    REQUIRE(done.has_value());
+    REQUIRE((*done)["job_id"] == "1234");
+    REQUIRE((*done)["state"] == "FINISH");
+    REQUIRE((*done)["mapping"] == nlohmann::json::array({0, 2}));
+    auto refill = observe(R"({"print":{"ams":{"tray_now":"3"}}})");
+    REQUIRE(refill.has_value());
+    REQUIRE((*refill)["active_slot"] == 3);
+    REQUIRE_FALSE(observe(R"({"print":{"ams":{"tray_exist_bits":"f"}}})"));
+    auto idle = observe(R"({"print":{"gcode_state":"IDLE","job_id":"0"}})", "0", "IDLE");
+    REQUIRE(idle.has_value());
+    REQUIRE((*idle)["op"] == "print_idle");
+}

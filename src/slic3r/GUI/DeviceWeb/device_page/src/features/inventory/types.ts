@@ -7,8 +7,14 @@ export type Roll = {
   archived: boolean; purchase_url: string; revision: string; history: Activity[];
 };
 export type AmsObservation = {uuid: string; slot: number; name: string; material: string; color: string; revision: string};
+export type PrintAttempt = {
+  attempt: string; title: string; status: 'prepared' | 'tracking' | 'review' | 'applied' | 'recorded' | 'excluded' | 'dismissed';
+  reason: string; state: string; job_id: string; updated_at: string;
+  planned: {id?: string; index: number; slot: number; grams: string}[];
+  allocations: {id: string; grams: string; remaining: string | null}[];
+};
 export type Inventory = { version: 1; revision: string; rolls: Roll[]; read_at: string;
-  ams: {pending: AmsObservation[]};
+  ams: {pending: AmsObservation[]}; print_jobs: PrintAttempt[];
   capabilities: { local_edit: boolean; undo: boolean; physical_load: boolean } };
 export type Details = Pick<Roll, 'name' | 'material' | 'brand' | 'finish' | 'profile' | 'color' | 'purchase_url'>;
 export type Stock = { source: Source | 'gross' | 'percent'; remaining: string | null; tare?: string | null };
@@ -19,6 +25,7 @@ export type Command =
   | { op: 'move'; id: string; expected: Roll; location: string; occupant: string | null; swap: boolean }
   | { op: 'archive' | 'restore'; id: string; expected: Roll }
   | { op: 'undo'; event_id: string }
+  | { op: 'print_reconcile'; attempt: string; expected_updated_at: string; already_in_balance: boolean; usage: Record<string, string>; expected_balances: Record<string, string> }
   | { op: 'ams_link'; uuid: string; observation_revision: string; id: string | null; expected: Roll | null };
 export type Reply = { ok: boolean; enabled?: boolean; theme?: string; error?: string; inventory?: Inventory;
   event_id?: string; created_id?: string | null };
@@ -49,6 +56,12 @@ function isRoll(value: unknown): value is Roll {
     && typeof value.source === 'string' && value.source in sourceLabel
     && Array.isArray(value.history) && value.history.every((e: unknown) => object(e) && typeof e.undoable === 'boolean' && ['id', 'at', 'summary', 'before', 'after'].every(k => typeof e[k] === 'string'));
 }
+function isPrintAttempt(value: unknown): value is PrintAttempt {
+  if (!object(value) || !['attempt', 'title', 'reason', 'state', 'job_id', 'updated_at'].every(k => typeof value[k] === 'string')
+      || typeof value.status !== 'string' || !['prepared','tracking','review','applied','recorded','excluded','dismissed'].includes(value.status)) return false;
+  return Array.isArray(value.planned) && value.planned.every((f: unknown) => object(f) && (f.id === undefined || typeof f.id === 'string') && typeof f.index === 'number' && typeof f.slot === 'number' && typeof f.grams === 'string')
+    && Array.isArray(value.allocations) && value.allocations.every((a: unknown) => object(a) && typeof a.id === 'string' && typeof a.grams === 'string' && nullableText(a.remaining));
+}
 export function parseReply(value: unknown): Reply {
   if (!object(value)) throw new Error('Invalid inventory response');
   if (value.error_code !== 0) throw new Error(typeof value.message === 'string' ? value.message : 'Inventory backend unavailable');
@@ -59,6 +72,7 @@ export function parseReply(value: unknown): Reply {
   const inventory = payload.inventory;
   if (!object(inventory) || inventory.version !== 1 || typeof inventory.revision !== 'string'
       || typeof inventory.read_at !== 'string' || !Array.isArray(inventory.rolls) || !inventory.rolls.every(isRoll)
+      || !Array.isArray(inventory.print_jobs) || !inventory.print_jobs.every(isPrintAttempt)
       || !object(inventory.ams) || !Array.isArray(inventory.ams.pending) || !inventory.ams.pending.every((o: unknown) => object(o) && typeof o.slot === 'number' && ['uuid','name','material','color','revision'].every(k => typeof o[k] === 'string'))
       || !object(inventory.capabilities) || typeof inventory.capabilities.local_edit !== 'boolean'
       || typeof inventory.capabilities.undo !== 'boolean' || typeof inventory.capabilities.physical_load !== 'boolean') {

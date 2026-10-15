@@ -57,7 +57,7 @@ export function useInventory(request: InventoryRequest) {
       const reply = await exchange({version: 1, request_id: retry.current.id, command});
       if (reply.inventory) { revision.current = reply.inventory.revision; setInventory(reply.inventory); }
       setStatus({kind: 'saved'});
-      setUndo(command.op === 'undo' ? null : reply.event_id ?? null);
+      setUndo((command.op === 'undo' || command.op === 'print_reconcile') ? null : reply.event_id ?? null);
       retry.current = null;
       return reply;
     } catch (error) {

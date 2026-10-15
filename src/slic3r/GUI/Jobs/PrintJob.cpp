@@ -1,4 +1,7 @@
 #include "PrintJob.hpp"
+#include "slic3r/GUI/fila_manager/SharedInventoryBridge.hpp"
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
 #include <regex>
 #include <algorithm>
 #include <chrono>
@@ -573,17 +576,42 @@ void PrintJob::process()
     DeviceManager* dev = wxGetApp().getDeviceManager();
     MachineObject* obj = dev->get_selected_machine();
 
-    auto wait_fn = [this, curr_percent, &obj](int state, std::string job_info) {
-            BOOST_LOG_TRIVIAL(info) << "print_job: get_job_info = " << job_info;
+    // Register the exact selected payload and physical roll bindings before any
+    // upload/start. The unique suffix also binds LAN jobs without an SDK callback.
+    std::string usage_attempt;
+    if (!m_is_calibration_task && SharedInventoryBridge::device_matches(m_dev_id)) {
+        usage_attempt = boost::uuids::to_string(boost::uuids::random_generator()());
+        usage_attempt.erase(std::remove(usage_attempt.begin(), usage_attempt.end(), '-'), usage_attempt.end());
+        params.project_name = truncate_string(params.project_name, 80) + "_u" + usage_attempt.substr(0, 12);
+        try {
+            auto mapping = json::parse(params.ams_mapping, nullptr, false);
+            if (mapping.is_discarded()) mapping = json::array();
+            const auto result = SharedInventoryBridge::request({{"version", 1}, {"request_id", "print-prepare-" + usage_attempt},
+                {"command", {{"op", "print_prepare"}, {"device_id", m_dev_id}, {"attempt", usage_attempt},
+                             {"path", params.filename}, {"plate", params.plate_index}, {"mapping", mapping},
+                             {"title", params.project_name}, {"previous_job_id", obj ? obj->job_id_ : ""}}}});
+            if (!result.value("ok", false)) throw std::runtime_error("Could not persist print usage tracking");
+        } catch (const std::exception& e) {
+            BOOST_LOG_TRIVIAL(error) << "Print usage registration failed: " << e.what();
+            this->show_error_info(_L("Could not save filament usage tracking. Refresh Filament Manager and try again."), 0, "", "");
+            return;
+        }
+    }
+    auto usage_bind = [this, &usage_attempt](const std::string& identity) {
+        if (usage_attempt.empty() || identity.empty() || identity == "0") return;
+        try {
+            SharedInventoryBridge::request({{"version", 1}, {"request_id", "print-bind-" + usage_attempt + "-" + identity},
+                {"command", {{"op", "print_bind"}, {"device_id", m_dev_id}, {"attempt", usage_attempt}, {"job_id", identity}}}});
+        } catch (...) { BOOST_LOG_TRIVIAL(warning) << "Print identity callback will retry through passive telemetry"; }
+    };
 
-            if (!obj->is_support_wait_sending_finish) {
-                return true;
-            }
+    auto wait_fn = [this, curr_percent, &obj, &usage_bind](int state, std::string job_info) {
+            BOOST_LOG_TRIVIAL(info) << "print_job: get_job_info = " << job_info;
 
             std::string curr_job_id;
             json job_info_j;
             try {
-                job_info_j.parse(job_info);
+                job_info_j = json::parse(job_info);
                 if (job_info_j.contains("job_id")) {
                     curr_job_id = DevJsonValParser::get_longlong_val(job_info_j["job_id"]);
                 }
@@ -592,6 +620,9 @@ void PrintJob::process()
             } catch(...) {
                 ;
             }
+
+            usage_bind(curr_job_id);
+            if (!obj || !obj->is_support_wait_sending_finish) return true;
 
             if (obj) {
                 int time_out = 0;
@@ -852,6 +883,13 @@ void PrintJob::process()
             this->update_status(curr_percent, _L("Storage needs to be inserted before printing via LAN."));
             return;
         }
+    }
+
+    if (!usage_attempt.empty()) {
+        try {
+            SharedInventoryBridge::request({{"version", 1}, {"request_id", "print-send-" + usage_attempt},
+                {"command", {{"op", "print_send_result"}, {"device_id", m_dev_id}, {"attempt", usage_attempt}, {"sent", result >= 0}}}});
+        } catch (...) { BOOST_LOG_TRIVIAL(warning) << "Print send acknowledgement was not recorded; attempt remains durable"; }
     }
 
     if (result < 0) {
