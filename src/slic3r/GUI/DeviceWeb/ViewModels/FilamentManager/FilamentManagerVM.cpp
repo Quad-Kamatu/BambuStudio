@@ -17,6 +17,7 @@
 #include "slic3r/GUI/EncodedFilament.hpp"
 #include "slic3r/GUI/fila_manager/wgtFilaManagerColorType.h"
 #include "slic3r/GUI/fila_manager/wgtFilaManagerStore.h"
+#include "slic3r/GUI/fila_manager/SharedInventoryBridge.hpp"
 #include "slic3r/GUI/fila_manager/wgtFilaManagerCloudClient.h"
 #include "slic3r/GUI/fila_manager/wgtFilaManagerCloudSync.h"
 #include "slic3r/GUI/fila_manager/wgtFilaManagerCloudDispatcher.h"
@@ -66,8 +67,23 @@ std::string normalize_ams_rfid_for_web(const std::string& tray_uuid, const std::
 
 } // namespace
 
-FilamentManagerVM::FilamentManagerVM()
+FilamentManagerVM::FilamentManagerVM() : m_shared_inventory_timer(this)
 {
+    if (SharedInventoryBridge::enabled()) {
+        Bind(wxEVT_TIMER, [this](wxTimerEvent&) {
+            auto* store = wxGetApp().fila_manager_store();
+            if (!store) return;
+            try {
+                const auto previous = store->spools_to_json();
+                store->save();
+                if (m_bridge && store->spools_to_json() != previous)
+                    ReportState("spool", "list");
+            } catch (const std::exception& e) {
+                BOOST_LOG_TRIVIAL(warning) << "Shared inventory refresh failed: " << e.what();
+            }
+        }, m_shared_inventory_timer.GetId());
+        m_shared_inventory_timer.Start(2000);
+    }
 #if !BBL_RELEASE_TO_PUBLIC
     wxGetApp().set_fila_debug_sink([this](const nlohmann::json& payload) {
         if (m_bridge) {
@@ -122,6 +138,7 @@ FilamentManagerVM::FilamentManagerVM()
 
 FilamentManagerVM::~FilamentManagerVM()
 {
+    m_shared_inventory_timer.Stop();
 #if !BBL_RELEASE_TO_PUBLIC
     wxGetApp().set_fila_debug_sink(nullptr);
 #endif
@@ -222,7 +239,7 @@ nlohmann::json FilamentManagerVM::HandleSpool(const std::string& action, const n
     if (action == "list") {
         return MakeResp("spool", action, 0, "", build_spool_list());
     }
-    if (is_spool_cloud_write_action(action) && (!store || !disp || !can_write_spool_to_cloud(agent))) {
+    if (!SharedInventoryBridge::enabled() && is_spool_cloud_write_action(action) && (!store || !disp || !can_write_spool_to_cloud(agent))) {
         return MakeResp("spool", action, -2, "cloud sync requires sign-in and network");
     }
     if (action == "add") {
@@ -800,7 +817,7 @@ nlohmann::json FilamentManagerVM::build_spool_list()
 {
     auto* store = wxGetApp().fila_manager_store();
     auto* agent = wxGetApp().getAgent();
-    if (!agent || !agent->is_user_login())
+    if (!SharedInventoryBridge::enabled() && (!agent || !agent->is_user_login()))
         return nlohmann::json::array();
     nlohmann::json spools = store ? store->spools_to_json() : nlohmann::json::array();
     if (!spools.is_array()) return spools;

@@ -3,6 +3,7 @@
 #include "wgtFilaManagerCloudClient.h"
 #include "wgtFilaManagerCloudSync.h"
 #include "wgtFilaManagerStore.h"
+#include "SharedInventoryBridge.hpp"
 
 #include "slic3r/GUI/GUI_App.hpp"
 #include "slic3r/GUI/DeviceManager.hpp"
@@ -83,6 +84,15 @@ wgtFilaManagerCloudDispatcher::wgtFilaManagerCloudDispatcher(
 
 void wgtFilaManagerCloudDispatcher::enqueue_pull()
 {
+    if (SharedInventoryBridge::enabled()) {
+        try {
+            wxGetApp().fila_manager_store()->save();
+            update_last_synced_now();
+            if (m_on_pull) m_on_pull(0, 0);
+        } catch (const std::exception& e) { record_error(-4, e.what()); }
+        notify_state();
+        return;
+    }
     if (m_pulling) {
         BOOST_LOG_TRIVIAL(info) << "[CloudDispatcher] enqueue_pull skipped: already pulling";
         return;
@@ -108,6 +118,18 @@ void wgtFilaManagerCloudDispatcher::enqueue_pull()
 
 void wgtFilaManagerCloudDispatcher::enqueue_push_create(const FilamentSpool& spool)
 {
+    if (SharedInventoryBridge::enabled()) {
+        try {
+            auto* store = wxGetApp().fila_manager_store();
+            auto id = store->add_spool(spool);
+            store->save();
+            if (m_on_push_done) m_on_push_done(id, "create");
+        } catch (const std::exception& e) {
+            record_error(-4, e.what());
+            if (m_on_push_failed) m_on_push_failed("", "create", -4, e.what());
+        }
+        return;
+    }
     wxGetApp().emit_fila_debug_log("data", "info", "Dispatcher enqueue push_create",
                                    "A create push operation was queued",
                                    {{"setting_id", spool.filament_id}});
@@ -120,6 +142,19 @@ void wgtFilaManagerCloudDispatcher::enqueue_push_update(const std::string& spool
                                                         std::function<void()> on_cloud_ok)
 {
     if (spool_id.empty()) return;
+    if (SharedInventoryBridge::enabled()) {
+        try {
+            auto* store = wxGetApp().fila_manager_store();
+            if (!store->apply_patch(spool_id, local_patch)) throw std::runtime_error("Roll no longer exists");
+            store->save();
+            if (on_cloud_ok) on_cloud_ok();
+            if (m_on_push_done) m_on_push_done(spool_id, "update");
+        } catch (const std::exception& e) {
+            record_error(-4, e.what());
+            if (m_on_push_failed) m_on_push_failed(spool_id, "update", -4, e.what());
+        }
+        return;
+    }
     wxGetApp().emit_fila_debug_log("data", "info", "Dispatcher enqueue push_update",
                                    "An update push operation was queued",
                                    {{"spool_id", spool_id},
@@ -134,6 +169,15 @@ void wgtFilaManagerCloudDispatcher::enqueue_push_update(const std::string& spool
 
 void wgtFilaManagerCloudDispatcher::enqueue_push_delete(const std::vector<std::string>& spool_ids)
 {
+    if (SharedInventoryBridge::enabled()) {
+        try {
+            auto* store = wxGetApp().fila_manager_store();
+            for (const auto& id : spool_ids) store->remove_spool(id);
+            store->save();
+            if (m_on_pull) m_on_pull(0, 0);
+        } catch (const std::exception& e) { record_error(-4, e.what()); notify_state(); }
+        return;
+    }
     if (spool_ids.empty()) return;
     wxGetApp().emit_fila_debug_log("data", "info", "Dispatcher enqueue push_delete",
                                    "A delete push operation was queued",
@@ -476,6 +520,9 @@ void wgtFilaManagerCloudDispatcher::run_push_delete_op(const std::vector<std::st
 void wgtFilaManagerCloudDispatcher::enqueue_sync_ams(
     BBL::AmsSyncParams params, std::function<void()> on_cloud_ok)
 {
+    // The shared ledger owns stock. Telemetry is not an independently measured
+    // roll loss and must not write a second stock balance in this mode.
+    if (SharedInventoryBridge::enabled()) return;
     wxGetApp().emit_fila_debug_log("data", "info", "Dispatcher enqueue sync_ams",
                                    "An AMS sync operation was queued",
                                    {{"item_count", static_cast<int>(params.items.size())}});

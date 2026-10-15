@@ -5,10 +5,11 @@
 #include "slic3r/GUI/DeviceWeb/IViewModel.hpp"
 #include <nlohmann/json.hpp>
 #include <string>
+#include <wx/timer.h>
 
 namespace Slic3r { namespace GUI {
 
-class FilamentManagerVM : public IViewModel {
+class FilamentManagerVM : public IViewModel, public wxEvtHandler {
 public:
     FilamentManagerVM();
     ~FilamentManagerVM() override;
@@ -80,6 +81,7 @@ private:
     // Only touched on the wx UI thread (dispatcher callbacks are UI-thread
     // CallAfter), so no locking is needed.
     int m_pending_pull_added_hint = 0;
+    wxTimer m_shared_inventory_timer;
 };
 
 }} // namespace Slic3r::GUI

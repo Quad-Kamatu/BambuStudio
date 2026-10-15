@@ -22,6 +22,26 @@ Automatic slice-based consumption deductions from the community PR are excluded.
 They require separate handling of Auto-Refill, job identity, retries, physical roll
 changes and already-accounted usage before becoming dependable.
 
+## Shared local inventory
+
+An optional trusted executable selected by `BAMBU_FORK_SHARED_INVENTORY` replaces
+the independent cloud/cache inventory with a shared backend. Studio invokes it
+directly with argv and private request/response files, never a shell. The JSON
+request contains `base` and `current` native spool arrays; the reply contains
+`ok`, canonical `spools`, and an optional error. The backend applies field changes
+with optimistic conflict checks and returns the authoritative current snapshot.
+Failed edits restore the acknowledged view. No cloud inventory writes or automatic
+AMS stock reconciliation run in this mode; printer controls remain separate.
+
+The Filament Manager refreshes from that backend every two seconds. Spool create,
+edit and archive operations use the same path. A companion widget can read/write
+the same canonical register under the same lock, without a copied stock database.
+Local profile metadata remains separate from canonical grams and slot locations.
+The Plasma-UI `studio_inventory.py` adapter implements this contract with its
+existing `roll_data.py` backend. Configure its private `shared_config.json` before
+packaging; the installer adds the helper and config environment to the launcher.
+The original cache remains a rollback snapshot when shared mode is disabled.
+
 ## Build and test on Linux
 
 An existing Docker installation is required. No host package installation or sudo

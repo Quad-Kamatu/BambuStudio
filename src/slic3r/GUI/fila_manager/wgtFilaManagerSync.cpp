@@ -1,5 +1,6 @@
 #include "wgtFilaManagerSync.h"
 #include "wgtFilaManagerStore.h"
+#include "SharedInventoryBridge.hpp"
 #include "wgtFilaManagerCloudSync.h"
 #include "wgtFilaManagerCloudClient.h"
 #include "wgtFilaManagerCloudDispatcher.h"
@@ -44,6 +45,7 @@ wgtFilaManagerSync::wgtFilaManagerSync(wgtFilaManagerStore* store)
 
 bool wgtFilaManagerSync::on_device_update(MachineObject* obj)
 {
+    if (SharedInventoryBridge::enabled()) return false;
     if (!obj || !m_store) return false;
     if (!obj->is_online()) return false;
     calibrate_pending_badges(obj);

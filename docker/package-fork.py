@@ -40,11 +40,21 @@ stage.rename(destination)
 profile = Path.home() / '.config/BambuStudioFork'
 launcher = Path.home() / '.local/bin/bambu-studio-fork'
 launcher.parent.mkdir(parents=True, exist_ok=True)
+shared_config = profile / 'filament_inventory/shared_config.json'
+shared_environment = ''
+if shared_config.is_file():
+    settings = json.loads(shared_config.read_text())
+    helper = Path(settings['helper'])
+    if not helper.is_absolute() or not helper.is_file():
+        raise SystemExit('Configured shared inventory helper is unavailable')
+    shared_environment = (f'export BAMBU_FORK_SHARED_INVENTORY={shlex.quote(str(helper))}\n'
+        f'export FILAMENT_SHARED_CONFIG={shlex.quote(str(shared_config))}\n')
 launcher.write_text('#!/bin/sh\n'
     'export SSL_CERT_FILE=/etc/ssl/cert.pem\nexport CURL_CA_BUNDLE=/etc/ssl/cert.pem\n'
     'export LC_ALL=en_US.UTF-8\nexport LANG=en_US.UTF-8\n'
     f'export LD_LIBRARY_PATH={shlex.quote(str(destination / "bin"))}\n'
     f'export BAMBU_FORK_LOCAL_INVENTORY={shlex.quote(str(profile / "filament_inventory/spools.json"))}\n'
+    + shared_environment +
     f'exec {shlex.quote(str(destination / "bin/bambu-studio"))} --datadir {shlex.quote(str(profile))} "$@"\n')
 launcher.chmod(0o755)
 desktop = Path.home() / '.local/share/applications/bambu-studio-fork.desktop'
@@ -58,6 +68,7 @@ report = dict(binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
               source=str(source), runtime=str(destination), profile=str(profile),
               launcher=str(launcher), runtime_dependencies='PASS',
               local_inventory_cache_enabled=True, automatic_consumption_deductions=False)
+report['shared_inventory_backend_enabled'] = bool(shared_environment)
 manifest = destination.parent / 'installed_build.json'
 manifest.write_text(json.dumps(report, indent=2) + '\n')
 manifest.chmod(0o600)

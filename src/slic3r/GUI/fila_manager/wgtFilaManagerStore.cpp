@@ -1,5 +1,6 @@
 #include "wgtFilaManagerStore.h"
 #include "FilamentInventoryCache.hpp"
+#include "SharedInventoryBridge.hpp"
 #include "libslic3r/Utils.hpp"
 #include "slic3r/GUI/GUI_App.hpp"
 
@@ -19,6 +20,7 @@
 namespace Slic3r { namespace GUI {
 
 namespace fs = boost::filesystem;
+static nlohmann::json shared_inventory_baseline = nlohmann::json::array();
 
 static std::string generate_uuid()
 {
@@ -216,6 +218,11 @@ std::string wgtFilaManagerStore::get_storage_path() const
 
 void wgtFilaManagerStore::load()
 {
+    if (SharedInventoryBridge::enabled()) {
+        shared_inventory_baseline = nlohmann::json::array();
+        save();
+        return;
+    }
     const char* path = std::getenv("BAMBU_FORK_LOCAL_INVENTORY");
     if (!path || !*path) return; // Normal upstream cloud-only behavior.
     try {
@@ -234,6 +241,35 @@ void wgtFilaManagerStore::load()
 
 void wgtFilaManagerStore::save()
 {
+    if (SharedInventoryBridge::enabled()) {
+        nlohmann::json result;
+        try {
+            result = SharedInventoryBridge::exchange(shared_inventory_baseline, spools_to_json());
+        } catch (...) {
+            // Do not leave an unacknowledged UI edit queued for a later retry.
+            m_spools.clear();
+            for (const auto& item : shared_inventory_baseline) {
+                auto spool = FilamentSpool::from_json(item);
+                m_spools.emplace(spool.spool_id, std::move(spool));
+            }
+            m_dirty = false;
+            throw;
+        }
+        if (result.contains("spools")) {
+            std::map<std::string, FilamentSpool> restored;
+            for (const auto& item : result.at("spools")) {
+                auto spool = FilamentSpool::from_json(item);
+                if (!restored.emplace(spool.spool_id, std::move(spool)).second)
+                    throw std::runtime_error("Shared inventory returned duplicate spool IDs");
+            }
+            m_spools = std::move(restored);
+            shared_inventory_baseline = spools_to_json();
+            m_dirty = false;
+        }
+        if (!result.value("ok", false))
+            throw std::runtime_error(result.value("error", std::string("Shared inventory edit failed")));
+        return;
+    }
     const char* path = std::getenv("BAMBU_FORK_LOCAL_INVENTORY");
     if (path && *path) {
         try {

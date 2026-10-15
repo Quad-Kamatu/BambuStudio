@@ -2956,7 +2956,8 @@ int GUI_App::OnExit()
     }
 
     if (m_fila_manager_store) {
-        m_fila_manager_store->save();
+        try { m_fila_manager_store->save(); }
+        catch (const std::exception&) { BOOST_LOG_TRIVIAL(error) << "Inventory backend unavailable during shutdown"; }
         delete m_fila_manager_store;
         m_fila_manager_store = nullptr;
     }
