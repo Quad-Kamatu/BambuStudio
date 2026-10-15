@@ -1,4 +1,5 @@
 #include "wgtFilaManagerStore.h"
+#include "FilamentInventoryCache.hpp"
 #include "libslic3r/Utils.hpp"
 #include "slic3r/GUI/GUI_App.hpp"
 
@@ -13,6 +14,7 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <cstdlib>
 
 namespace Slic3r { namespace GUI {
 
@@ -214,12 +216,42 @@ std::string wgtFilaManagerStore::get_storage_path() const
 
 void wgtFilaManagerStore::load()
 {
-    // local persistence removed — store starts empty, populated by cloud pull after login
+    const char* path = std::getenv("BAMBU_FORK_LOCAL_INVENTORY");
+    if (!path || !*path) return; // Normal upstream cloud-only behavior.
+    try {
+        std::map<std::string, FilamentSpool> restored;
+        for (const auto& item : FilamentInventoryCache::read(path)) {
+            auto spool = FilamentSpool::from_json(item);
+            restored.emplace(spool.spool_id, std::move(spool));
+        }
+        m_spools = std::move(restored);
+        m_dirty = false;
+        BOOST_LOG_TRIVIAL(info) << "[FilaManager] restored local inventory cache, rolls=" << m_spools.size();
+    } catch (const std::exception&) {
+        BOOST_LOG_TRIVIAL(error) << "[FilaManager] local inventory cache could not be read; retained current inventory";
+    }
 }
 
 void wgtFilaManagerStore::save()
 {
-    // local persistence removed
+    const char* path = std::getenv("BAMBU_FORK_LOCAL_INVENTORY");
+    if (path && *path) {
+        try {
+            // Preserve a damaged cache for recovery instead of replacing it
+            // with an empty store after a failed startup restore.
+            if (std::filesystem::exists(path)) {
+                for (const auto& item : FilamentInventoryCache::read(path))
+                    (void)FilamentSpool::from_json(item);
+            }
+            nlohmann::json spools = nlohmann::json::array();
+            for (const auto& entry : m_spools)
+                spools.push_back(entry.second.to_json());
+            FilamentInventoryCache::write(path, spools);
+        } catch (const std::exception&) {
+            BOOST_LOG_TRIVIAL(error) << "[FilaManager] local inventory cache save failed; retained previous cache";
+            return;
+        }
+    }
     m_dirty = false;
 }
 

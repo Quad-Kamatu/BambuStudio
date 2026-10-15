@@ -695,6 +695,68 @@ std::optional<FilamentBaseInfo> PresetBundle::get_filament_by_filament_id(const 
     return std::nullopt;
 }
 
+// Adapted from JaKuBisz's upstream PR #12060; keep the current printer filter.
+std::optional<FilamentBaseInfo> PresetBundle::resolve_filament_for_spool(
+    const std::string& stored_id, const std::string& vendor,
+    const std::string& material_type, const std::string& printer_name) const
+{
+    auto compatible_info = [&](const std::string& id) -> std::optional<FilamentBaseInfo> {
+        auto info = get_filament_by_filament_id(id, printer_name);
+        if (info && !material_type.empty() && info->filament_type != material_type)
+            return std::nullopt;
+        return info;
+    };
+    if (auto info = compatible_info(stored_id))
+        return info;
+
+    auto string_option = [](const Preset& preset, const char* key) -> std::string {
+        const auto* option = preset.config.option<ConfigOptionStrings>(key);
+        return option && !option->values.empty() ? option->values.front() : std::string();
+    };
+    if (!stored_id.empty()) {
+        for (const auto& preset : filaments) {
+            if (preset.setting_id == stored_id && !preset.filament_id.empty()) {
+                if (auto info = compatible_info(preset.filament_id))
+                    return info;
+            }
+        }
+    }
+    // Never guess a polymer for an inventory record with no material evidence.
+    if (material_type.empty())
+        return std::nullopt;
+
+    if (!vendor.empty()) {
+        std::optional<FilamentBaseInfo> vendor_match;
+        std::set<std::string> vendor_ids;
+        for (const auto& preset : filaments) {
+            if (string_option(preset, "filament_vendor") == vendor &&
+                string_option(preset, "filament_type") == material_type) {
+                if (auto info = compatible_info(preset.filament_id)) {
+                    vendor_ids.insert(info->filament_id);
+                    vendor_match = info;
+                }
+            }
+        }
+        // Vendor + polymer alone does not distinguish e.g. basic, silk and
+        // foaming PLA. Use a vendor match only when it identifies one profile.
+        if (vendor_ids.size() == 1)
+            return vendor_match;
+    }
+    const std::string generic_name = "Generic " + material_type;
+    for (const auto& preset : filaments) {
+        if (!preset.is_system || string_option(preset, "filament_type") != material_type)
+            continue;
+        // Exact material name avoids selecting e.g. Generic PLA Silk as the
+        // fallback for ordinary PLA. A valid original Silk ID is retained above.
+        if (preset.alias != generic_name && preset.name != generic_name &&
+            !boost::istarts_with(preset.name, generic_name + " @"))
+            continue;
+        if (auto info = compatible_info(preset.filament_id))
+            return info;
+    }
+    return std::nullopt;
+}
+
 //BBS: load project embedded presets
 PresetsConfigSubstitutions PresetBundle::load_project_embedded_presets(std::vector<Preset*> project_presets, ForwardCompatibilitySubstitutionRule substitution_rule)
 {

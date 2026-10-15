@@ -46,3 +46,10 @@ endif()
 
 # catch_discover_tests(${_TEST_NAME}_tests TEST_PREFIX "${_TEST_NAME}: ")
 add_test(${_TEST_NAME}_tests ${_TEST_NAME}_tests ${CATCH_EXTRA_ARGS})
+
+add_executable(filament_spool_resolution_tests test_filament_spool_resolution.cpp
+    ${PROJECT_SOURCE_DIR}/src/slic3r/Utils/Http.cpp
+    ${PROJECT_SOURCE_DIR}/src/slic3r/Utils/BBLUtil.cpp)
+target_link_libraries(filament_spool_resolution_tests test_common libslic3r
+    libcurl OpenSSL::SSL OpenSSL::Crypto)
+add_test(NAME filament_spool_resolution_tests COMMAND filament_spool_resolution_tests)

@@ -113,7 +113,7 @@ bool wgtFilaManagerPanel::Show(bool show)
         auto* store = wxGetApp().fila_manager_store();
         if (store && store->is_dirty()) {
             push_to_web("spool_list", build_spool_list());
-            store->clear_dirty();
+            store->save();
         }
     }
     return wxPanel::Show(show);

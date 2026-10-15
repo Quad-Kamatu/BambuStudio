@@ -847,7 +847,11 @@ void AMSMaterialsSetting::on_select_ok(wxCommandEvent& event)
         auto* store = wxGetApp().fila_manager_store();
         const FilamentSpool* sp = store ? store->get_spool(m_selected_spool_id) : nullptr;
         if (sp) {
-            filament_item.filament_id = sp->filament_id;
+            if (preset_bundle) {
+                if (auto info = preset_bundle->resolve_filament_for_spool(
+                        sp->filament_id, sp->brand, sp->material_type))
+                    filament_item.filament_id = info->filament_id;
+            }
             filament_item.setting_id  = sp->filament_id;
             filament_item.spool_id    = sp->spool_id;
         }
@@ -2512,7 +2516,7 @@ void AMSMaterialsSetting::apply_filament_selection()
         auto* store = wxGetApp().fila_manager_store();
         const FilamentSpool* sp = store ? store->get_spool(m_selected_spool_id) : nullptr;
         if (sp && preset_bundle) {
-            auto fila_info = preset_bundle->get_filament_by_filament_id(sp->filament_id);
+            auto fila_info = preset_bundle->resolve_filament_for_spool(sp->filament_id, sp->brand, sp->material_type);
             if (fila_info.has_value()) {
                 ams_filament_id = fila_info->filament_id;
                 ams_setting_id  = fila_info->setting_id;

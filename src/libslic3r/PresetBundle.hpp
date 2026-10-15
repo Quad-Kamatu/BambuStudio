@@ -217,6 +217,13 @@ public:
 
     std::optional<FilamentBaseInfo> get_filament_by_filament_id(const std::string& filament_id, const std::string& printer_name = std::string(), bool only_system = false) const;
 
+    // Recover manually registered spools whose ID is empty or a cloud setting
+    // ID. Keep material and printer compatibility when using a Generic fallback.
+    std::optional<FilamentBaseInfo> resolve_filament_for_spool(
+        const std::string& stored_id, const std::string& vendor,
+        const std::string& material_type,
+        const std::string& printer_name = std::string()) const;
+
     // Load support recommended params from JSON file
     void load_support_recommended_params();
     // Get support recommended params by (support_material, model_material)

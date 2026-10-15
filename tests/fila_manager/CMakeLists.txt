@@ -38,3 +38,8 @@ if (WIN32)
 endif()
 
 add_test(${_TEST_NAME}_tests ${_TEST_NAME}_tests "${CATCH_EXTRA_ARGS} exclude:[NotWorking]")
+
+add_executable(filament_inventory_cache_tests test_inventory_cache.cpp)
+target_include_directories(filament_inventory_cache_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(filament_inventory_cache_tests test_common)
+add_test(NAME filament_inventory_cache_tests COMMAND filament_inventory_cache_tests)

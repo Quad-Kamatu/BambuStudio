@@ -2956,6 +2956,7 @@ int GUI_App::OnExit()
     }
 
     if (m_fila_manager_store) {
+        m_fila_manager_store->save();
         delete m_fila_manager_store;
         m_fila_manager_store = nullptr;
     }
@@ -3592,6 +3593,7 @@ bool GUI_App::on_init_inner()
         // Initialize Filament Manager store & sync
         if (!m_fila_manager_store) {
             m_fila_manager_store = new wgtFilaManagerStore();
+            m_fila_manager_store->load();
             BOOST_LOG_TRIVIAL(info) << "Filament Manager store initialized";
         }
         if (!m_fila_manager_sync) {

@@ -543,9 +543,9 @@ void FilamentSelectDialog::fill_manager_tab()
             const FilamentSpool* sp = store->get_spool(id);
             if (!sp) continue;
             bool has_preset = false;
-            if (bundle && !sp->filament_id.empty()) {
+            if (bundle) {
                 for (const auto& printer_name : m_printer_names) {
-                    if (bundle->get_filament_by_filament_id(sp->filament_id, printer_name).has_value()) {
+                    if (bundle->resolve_filament_for_spool(sp->filament_id, sp->brand, sp->material_type, printer_name).has_value()) {
                         has_preset = true;
                         break;
                     }
