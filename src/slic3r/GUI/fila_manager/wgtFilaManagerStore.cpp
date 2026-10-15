@@ -220,6 +220,7 @@ void wgtFilaManagerStore::load()
 {
     if (SharedInventoryBridge::enabled()) {
         shared_inventory_baseline = nlohmann::json::array();
+        m_spools.clear();
         save();
         return;
     }

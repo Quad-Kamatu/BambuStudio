@@ -216,6 +216,7 @@ set(DEVICE_PAGE_BUILD_INPUTS
     "${DEVICE_PAGE_SRC_DIR}/vite.config.ts"
     "${DEVICE_PAGE_SRC_DIR}/tsconfig.json"
     "${DEVICE_PAGE_SRC_DIR}/tsconfig.app.json"
+    "${DEVICE_PAGE_SRC_DIR}/tsconfig.inventory.json"
     "${DEVICE_PAGE_SRC_DIR}/tsconfig.node.json"
     "${DEVICE_PAGE_SRC_DIR}/eslint.config.js"
     "${DEVICE_PAGE_SRC_DIR}/i18next-parser.config.js"

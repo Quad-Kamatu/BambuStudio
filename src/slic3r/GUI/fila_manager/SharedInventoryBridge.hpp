@@ -16,7 +16,7 @@ inline bool enabled()
 
 // A local trusted executable, invoked as argv (never through a shell). All
 // request/response files live in a private temporary directory and are removed.
-inline nlohmann::json exchange(const nlohmann::json& base, const nlohmann::json& current)
+inline nlohmann::json request(const nlohmann::json& payload)
 {
     namespace bp = boost::process;
     namespace fs = boost::filesystem;
@@ -31,7 +31,7 @@ inline nlohmann::json exchange(const nlohmann::json& base, const nlohmann::json&
     auto output = directory / "response.json";
     {
         std::ofstream file(input.string());
-        file << nlohmann::json{{"base", base}, {"current", current}};
+        file << payload;
         if (!file) throw std::runtime_error("Cannot prepare shared inventory request");
     }
     bp::child worker(helper, input.string(), output.string(), bp::std_out > bp::null, bp::std_err > bp::null);
@@ -44,5 +44,9 @@ inline nlohmann::json exchange(const nlohmann::json& base, const nlohmann::json&
     std::ifstream file(output.string());
     nlohmann::json result; file >> result;
     return result;
+}
+inline nlohmann::json exchange(const nlohmann::json& base, const nlohmann::json& current)
+{
+    return request({{"base", base}, {"current", current}});
 }
 }}}

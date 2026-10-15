@@ -163,6 +163,25 @@ nlohmann::json FilamentManagerVM::OnCommand(
     BOOST_LOG_TRIVIAL(info) << "FilamentManagerVM::OnCommand submod=" << submod
                             << " action=" << action;
 
+    if (submod == "inventory") {
+        if (!SharedInventoryBridge::enabled())
+            return MakeResp(submod, action, 0, "", {{"enabled", false}});
+        try {
+            auto request = payload;
+            request["version"] = 1;
+            auto result = SharedInventoryBridge::request(request);
+            result["enabled"] = true;
+            result["theme"] = wxGetApp().app_config->get("dark_color_mode") == "1" ? "dark" : "light";
+            if (payload.contains("command") && result.value("ok", false)) {
+                // Reload from the canonical register, never replay the old native view.
+                if (auto* store = wxGetApp().fila_manager_store()) store->load();
+                ReportState("spool", "list");
+            }
+            return MakeResp(submod, action, 0, "", result);
+        } catch (const std::exception& e) {
+            return MakeResp(submod, action, -1, e.what());
+        }
+    }
     if (submod == "init")          return HandleInit(action, payload);
     if (submod == "spool")         return HandleSpool(action, payload);
     if (submod == "preset")        return HandlePreset(action, payload);

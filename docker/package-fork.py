@@ -69,6 +69,9 @@ report = dict(binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
               launcher=str(launcher), runtime_dependencies='PASS',
               local_inventory_cache_enabled=True, automatic_consumption_deductions=False)
 report['shared_inventory_backend_enabled'] = bool(shared_environment)
+report['web_resources_sha256'] = {str(p.relative_to(destination / 'resources')): hashlib.sha256(p.read_bytes()).hexdigest()
+    for p in (destination / 'resources/web/device_page/dist').rglob('*') if p.is_file() and p.suffix in ('.js', '.css', '.html')}
+report['local_inventory_cache_enabled'] = not bool(shared_environment)
 manifest = destination.parent / 'installed_build.json'
 manifest.write_text(json.dumps(report, indent=2) + '\n')
 manifest.chmod(0o600)
