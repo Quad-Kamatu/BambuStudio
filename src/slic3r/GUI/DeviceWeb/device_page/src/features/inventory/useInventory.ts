@@ -7,6 +7,7 @@ export function useInventory(request: InventoryRequest) {
   const [inventory, setInventory] = useState<Inventory | null>(null);
   const [enabled, setEnabled] = useState(true);
   const [theme, setTheme] = useState('dark');
+  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
   const [status, setStatus] = useState<SaveState>({kind: 'loading'});
   const [undo, setUndo] = useState<string | null>(null);
   const busy = useRef(false);

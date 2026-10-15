@@ -20,7 +20,7 @@ config = {'device': {'dev_id': 'fixture', 'device_name': 'Fixture', 'ams_type': 
 theme = 'dark'; fail = False
 
 def seed(count=11):
-    rows = LEDGER.split('### Print usage ledger')[0]
+    rows = LEDGER.split('### Print usage ledger')[0].replace('| BLACK-001 |', '| **BLACK-001** — original physical roll |').replace('| WHITE-001 |', '| `WHITE-001` — current white roll |')
     for n in range(max(0, count-3)):
         amount = 'Unknown' if n == 0 else '0 g user-confirmed empty' if n == 1 else f'{10 if n == 2 else 900} g estimate; not weighed'
         location = 'AMS 1 slot 3' if n == 3 else 'Storage'
